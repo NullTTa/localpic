@@ -1,79 +1,79 @@
 package com.localpick.domain.post;
 
-import com.localpick.config.SessionConst;
-import com.localpick.domain.like.LikeService;
-import jakarta.servlet.http.HttpSession;
+import com.localpick.common.ApiResponse;
+import com.localpick.common.PageResponse;
+import com.localpick.config.LoginMember;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
-import org.springframework.validation.BindingResult;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+
+import java.util.List;
 
 /**
- * [MVC 버전] 게시물 컨트롤러
- * - 화면(Thymeleaf 템플릿) 이름을 반환하고, 데이터는 Model 에 담아 서버에서 HTML 을 만든다.
- * - 좋아요 하나를 눌러도 redirect → 페이지 전체를 다시 그린다.
+ * 게시물 REST 컨트롤러.
+ * (MVC 버전: @Controller + Model + "post/list" 뷰 이름 반환 → REST 버전: @RestController + JSON 반환)
  */
-@Controller
-@RequestMapping("/posts")
+@RestController
+@RequestMapping("/api/posts")
 @RequiredArgsConstructor
 public class PostController {
 
     private final PostService postService;
-    private final LikeService likeService;
 
+    /** GET /api/posts?type=PROMOTION&page=0&size=10 */
     @GetMapping
-    public String list(@RequestParam(required = false) PostType type,
-                       @RequestParam(defaultValue = "0") int page,
-                       HttpSession session, Model model) {
-        Long loginId = (Long) session.getAttribute(SessionConst.LOGIN_MEMBER_ID);
-        model.addAttribute("posts", postService.feed(type, page, 10, loginId));
-        model.addAttribute("type", type);
-        return "post/list";
+    public ApiResponse<PageResponse<PostDto.Response>> feed(@RequestParam(required = false) PostType type,
+                                                            @RequestParam(defaultValue = "0") int page,
+                                                            @RequestParam(defaultValue = "10") int size,
+                                                            @LoginMember(required = false) Long loginId) {
+        return ApiResponse.ok(postService.feed(type, page, size, loginId));
+    }
+
+    @GetMapping("/following")
+    public ApiResponse<PageResponse<PostDto.Response>> following(@RequestParam(defaultValue = "0") int page,
+                                                                 @RequestParam(defaultValue = "10") int size,
+                                                                 @LoginMember Long loginId) {
+        return ApiResponse.ok(postService.followingFeed(loginId, page, size));
+    }
+
+    @GetMapping("/events/ongoing")
+    public ApiResponse<List<PostDto.Response>> ongoingEvents(@LoginMember(required = false) Long loginId) {
+        return ApiResponse.ok(postService.ongoingEvents(loginId));
+    }
+
+    @GetMapping("/member/{memberId}")
+    public ApiResponse<PageResponse<PostDto.Response>> byMember(@PathVariable Long memberId,
+                                                                @RequestParam(defaultValue = "0") int page,
+                                                                @RequestParam(defaultValue = "12") int size,
+                                                                @LoginMember(required = false) Long loginId) {
+        return ApiResponse.ok(postService.byWriter(memberId, page, size, loginId));
     }
 
     @GetMapping("/{postId}")
-    public String detail(@PathVariable Long postId, HttpSession session, Model model) {
-        Long loginId = (Long) session.getAttribute(SessionConst.LOGIN_MEMBER_ID);
-        model.addAttribute("post", postService.detail(postId, loginId));
-        return "post/detail";
+    public ApiResponse<PostDto.Response> detail(@PathVariable Long postId,
+                                                @LoginMember(required = false) Long loginId) {
+        return ApiResponse.ok(postService.detail(postId, loginId));
     }
 
-    @GetMapping("/new")
-    public String writeForm(HttpSession session, Model model) {
-        if (session.getAttribute(SessionConst.LOGIN_MEMBER_ID) == null) {
-            return "redirect:/login";
-        }
-        model.addAttribute("form", new PostDto.WriteRequest());
-        return "post/write";
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<PostDto.Response> create(@LoginMember Long loginId,
+                                                @Valid @ModelAttribute PostDto.WriteRequest req) {
+        return ApiResponse.ok("게시물이 등록되었습니다.", postService.create(loginId, req));
     }
 
-    @PostMapping("/new")
-    public String write(@Valid @ModelAttribute("form") PostDto.WriteRequest form, BindingResult bindingResult,
-                        HttpSession session, RedirectAttributes ra) {
-        Long loginId = (Long) session.getAttribute(SessionConst.LOGIN_MEMBER_ID);
-        if (loginId == null) return "redirect:/login";
-        if (bindingResult.hasErrors()) return "post/write";
-
-        PostDto.Response saved = postService.create(loginId, form);
-        ra.addAttribute("postId", saved.getId());
-        return "redirect:/posts/{postId}";
+    @PutMapping(value = "/{postId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<PostDto.Response> update(@PathVariable Long postId,
+                                                @LoginMember Long loginId,
+                                                @Valid @ModelAttribute PostDto.WriteRequest req) {
+        return ApiResponse.ok("게시물이 수정되었습니다.", postService.update(postId, loginId, req));
     }
 
-    @PostMapping("/{postId}/like")
-    public String like(@PathVariable Long postId, HttpSession session) {
-        Long loginId = (Long) session.getAttribute(SessionConst.LOGIN_MEMBER_ID);
-        if (loginId == null) return "redirect:/login";
-        likeService.toggle(postId, loginId);
-        return "redirect:/posts/" + postId;   // 좋아요 후 상세 페이지 전체 새로고침
-    }
-
-    @PostMapping("/{postId}/delete")
-    public String delete(@PathVariable Long postId, HttpSession session) {
-        Long loginId = (Long) session.getAttribute(SessionConst.LOGIN_MEMBER_ID);
+    @DeleteMapping("/{postId}")
+    public ApiResponse<Void> delete(@PathVariable Long postId, @LoginMember Long loginId) {
         postService.delete(postId, loginId);
-        return "redirect:/posts";
+        return ApiResponse.ok(null);
     }
 }
